@@ -8,6 +8,7 @@ export interface Layer {
   members: number[]; // 結合されたクラスタ id
   hex: string;
   origHex: string;
+  name?: string;
   visible: boolean;
   mode: StitchMode;
   shape: ShapeMode;

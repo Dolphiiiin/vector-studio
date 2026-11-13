@@ -77,7 +77,10 @@ export function LayerList({ layers, areas, selected, onSelect, onUpdate, onReord
                 </ColorSwatchPicker>
               </ColorPicker>
               <div className="layer-meta">
-                <span className="hex">{l.hex.toUpperCase()}</span>
+                <span className="hex">
+                  {l.name && <span className="layer-name">{l.name}</span>}
+                  {l.hex.toUpperCase()}
+                </span>
                 <span className="sub">
                   {l.mode === 'line' ? '線' : '塗り'}
                   {l.shape === 'straight' ? '  直線' : l.shape === 'rect' ? '  四角' : ''}

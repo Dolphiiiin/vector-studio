@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "vite --host",
     "build": "tsc && vite build",
-    "preview": "vite preview --host"
+    "preview": "vite preview --host",
+    "build:artifact": "npm run build && node scripts/make-artifact.mjs"
   },
   "dependencies": {
     "@adobe/react-spectrum": "^3.47.7",

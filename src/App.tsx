@@ -21,7 +21,12 @@ import ImageAdd from '@spectrum-icons/workflow/ImageAdd';
 import SaveFloppy from '@spectrum-icons/workflow/SaveFloppy';
 import Share from '@spectrum-icons/workflow/Share';
 import Compare from '@spectrum-icons/workflow/Compare';
-import { loadImage, runBuild, runQuantize } from './engine/client';
+import MagicWand from '@spectrum-icons/workflow/MagicWand';
+import Undo from '@spectrum-icons/workflow/Undo';
+import AlertCircle from '@spectrum-icons/workflow/AlertCircle';
+import { loadImage, runAnalyze, runBuild, runQuantize } from './engine/client';
+import { autoShapes } from './engine/analyze';
+import { applyPlan, buildPrompt, errorText, getDownloads, getSample, imageDataToBlob, svgToPng, type AiPlan } from './ai';
 import { toSvg, type BuildOptions, type BuildResult, type Layer } from './engine/build';
 import type { QuantizeResult } from './engine/quantize';
 import { LayerList } from './LayerList';
@@ -65,6 +70,17 @@ export default function App() {
   const [busy, setBusy] = useState(0);
   const quantSeq = useRef(0);
   const buildSeq = useRef(0);
+  const [sample, setSample] = useState<Awaited<ReturnType<typeof getSample>>>(null);
+  const [downloads, setDownloads] = useState<Awaited<ReturnType<typeof getDownloads>>>(null);
+  const [aiRunning, setAiRunning] = useState(false);
+  const [aiError, setAiError] = useState<string | null>(null);
+  const [beforeAi, setBeforeAi] = useState<Layer[] | null>(null);
+  const aiCtl = useRef<AbortController | null>(null);
+
+  useEffect(() => {
+    getSample().then((s) => setSample(() => s));
+    getDownloads().then(setDownloads);
+  }, []);
 
   const hoop = HOOPS.find((h) => h.key === hoopKey)!;
 
@@ -104,8 +120,9 @@ export default function App() {
         .then((q) => {
           if (seq !== quantSeq.current) return;
           setQuant(q);
-          setLayers(
-            q.clusters.map((c) => ({
+          setBeforeAi(null);
+          setAiError(null);
+          const init: Layer[] = q.clusters.map((c) => ({
               key: `c${c.id}`,
               members: [c.id],
               hex: c.hex,
@@ -115,8 +132,12 @@ export default function App() {
               shape: 'smooth',
               offsetMm: 0,
               underlay: false,
-            })),
-          );
+            }));
+          setLayers(init);
+          // 長方形に近い色は自動で「四角」に
+          runAnalyze(q, init, Math.round(shape.minDetailMm2 * pxPerMm * pxPerMm)).then((st) => {
+            if (seq === quantSeq.current) setLayers((prev) => (prev === init ? autoShapes(init, st) : prev));
+          });
         })
         .finally(() => setBusy((b) => b - 1));
     }, 200);
@@ -149,7 +170,11 @@ export default function App() {
     return `${base}-${layers.filter((l) => l.visible).length}c.svg`;
   };
 
-  const save = () => {
+  const save = async () => {
+    if (downloads) {
+      await downloads.save({ filename: fileName(), data: svgText }).catch(() => {});
+      return;
+    }
     const blob = new Blob([svgText], { type: 'image/svg+xml' });
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
@@ -159,8 +184,32 @@ export default function App() {
   };
 
   const shareFile = useMemo(() => (svgText ? new File([svgText], fileName(), { type: 'image/svg+xml' }) : null), [svgText]); // eslint-disable-line react-hooks/exhaustive-deps
-  const canShare = !!shareFile && typeof navigator.canShare === 'function' && navigator.canShare({ files: [shareFile] });
+  const canShare = !downloads && !!shareFile && typeof navigator.canShare === 'function' && navigator.canShare({ files: [shareFile] });
   const share = () => shareFile && navigator.share({ files: [shareFile] }).catch(() => {});
+
+  const runAi = async () => {
+    if (!sample || !quant || !image || !svgText) return;
+    const ctl = new AbortController();
+    aiCtl.current = ctl;
+    setAiRunning(true);
+    setAiError(null);
+    const base = layers;
+    try {
+      const pxPerMm = Math.max(quant.width, quant.height) / build.sizeMm;
+      const stats = await runAnalyze(quant, base, Math.round(shape.minDetailMm2 * pxPerMm * pxPerMm));
+      const images = [await imageDataToBlob(image), await svgToPng(svgText)];
+      const plan = await sample.json<AiPlan>(buildPrompt(base, stats), { images, modelTier: 'quick', signal: ctl.signal });
+      setBeforeAi(base);
+      setLayers(applyPlan(base, plan));
+      setSelected(null);
+    } catch (e) {
+      const code = (e as { code?: string })?.code ?? '';
+      if (code === 'not_granted' || code === 'sampling_disabled' || code === 'images_unavailable') setSample(null);
+      else if (code !== 'cancelled') setAiError(errorText(code));
+    } finally {
+      setAiRunning(false);
+    }
+  };
 
   const updateLayer = (key: string, patch: Partial<Layer>) =>
     setLayers((ls) => ls.map((l) => (l.key === key ? { ...l, ...patch } : l)));
@@ -291,6 +340,41 @@ export default function App() {
         <TabPanels>
           <Item key="colors">
             <div className="panel">
+              {sample && (
+                <div className="ai-row">
+                  {aiRunning ? (
+                    <>
+                      <ProgressCircle size="S" isIndeterminate aria-label="整えています" />
+                      <ActionButton isQuiet onPress={() => aiCtl.current?.abort()}>
+                        止める
+                      </ActionButton>
+                    </>
+                  ) : (
+                    <Button variant="primary" style="outline" onPress={runAi} isDisabled={!svgText}>
+                      <MagicWand />
+                      <Text>おまかせで整える</Text>
+                    </Button>
+                  )}
+                  {beforeAi && !aiRunning && (
+                    <ActionButton
+                      isQuiet
+                      onPress={() => {
+                        setLayers(beforeAi);
+                        setBeforeAi(null);
+                      }}
+                    >
+                      <Undo />
+                      <Text>元に戻す</Text>
+                    </ActionButton>
+                  )}
+                </div>
+              )}
+              {aiError && (
+                <div className="ai-error">
+                  <AlertCircle size="S" />
+                  <span>{aiError}</span>
+                </div>
+              )}
               <LayerList
                 layers={layers}
                 areas={result?.layers}
