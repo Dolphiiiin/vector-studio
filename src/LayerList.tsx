@@ -83,7 +83,7 @@ export function LayerList({ layers, areas, selected, onSelect, onUpdate, onReord
                 </span>
                 <span className="sub">
                   {l.mode === 'line' ? '線' : '塗り'}
-                  {l.shape === 'straight' ? '  直線' : l.shape === 'rect' ? '  四角' : ''}
+                  {l.shape === 'straight' ? '  直線' : l.shape === 'rect' ? '  四角' : l.shape === 'smooth' ? '  曲線' : ''}
                   {l.visible && area > 0 ? `  ${area.toFixed(0)} mm²` : ''}
                 </span>
               </div>
@@ -118,9 +118,10 @@ export function LayerList({ layers, areas, selected, onSelect, onUpdate, onReord
                   density="compact"
                   isJustified
                 >
-                  <Item key="smooth">なめらか</Item>
-                  <Item key="straight">直線</Item>
+                  <Item key="auto">自動</Item>
                   <Item key="rect">四角</Item>
+                  <Item key="straight">直線</Item>
+                  <Item key="smooth">曲線</Item>
                 </ActionGroup>
                 <LiveSlider
                   label="余白"
@@ -131,9 +132,6 @@ export function LayerList({ layers, areas, selected, onSelect, onUpdate, onReord
                   format={(v) => `${v > 0 ? '+' : ''}${v.toFixed(1)} mm`}
                   onCommit={(v) => onUpdate(l.key, { offsetMm: v })}
                 />
-                <Switch isSelected={l.underlay} onChange={(v) => onUpdate(l.key, { underlay: v })}>
-                  内側の色の下も縫う
-                </Switch>
                 <Flex gap="size-100" wrap>
                   <ActionButton onPress={() => move(i, -1)} isDisabled={i === 0}>
                     <ChevronUp />

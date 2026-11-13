@@ -1,4 +1,4 @@
-import { fitLoop, rectFromLoop, segsToPath, type FitOptions, type Pt } from './fit';
+import type { Pt } from './fit';
 
 /** 2パスのチャンファー距離変換（3-4）。mask 内側の各画素について外側までの距離(px)を返す */
 function distance(mask: Uint8Array, w: number, h: number, inside: boolean): Float32Array {
@@ -75,7 +75,7 @@ export function enclosedHoles(mask: Uint8Array, w: number, h: number): Uint8Arra
  * 画素の境界をたどって閉じた輪郭を作る。内側が常に進行方向の右になる向き。
  * 頂点は (w+1)x(h+1) の格子点。
  */
-function traceLoops(mask: Uint8Array, w: number, h: number): Pt[][] {
+export function traceLoops(mask: Uint8Array, w: number, h: number): Pt[][] {
   const W = w + 1;
   const inside = (x: number, y: number) => x >= 0 && y >= 0 && x < w && y < h && mask[y * w + x] === 1;
   // 各頂点から出るエッジ（最大2本）。方向 0:右 1:下 2:左 3:上
@@ -123,34 +123,3 @@ function traceLoops(mask: Uint8Array, w: number, h: number): Pt[][] {
   return loops;
 }
 
-function area(loop: Pt[]) {
-  let s = 0;
-  for (let i = 0; i < loop.length; i++) {
-    const [x1, y1] = loop[i], [x2, y2] = loop[(i + 1) % loop.length];
-    s += x1 * y2 - x2 * y1;
-  }
-  return s / 2;
-}
-
-const fmt = (v: number) => (Math.round(v * 100) / 100).toString();
-
-export interface TraceOptions extends FitOptions {
-  originX: number;
-  originY: number;
-  minLoopArea: number; // px²
-}
-
-export function maskToPath(mask: Uint8Array, w: number, h: number, scale: number, opt: TraceOptions): string {
-  const S = (q: Pt) => `${fmt((q[0] - opt.originX) * scale)} ${fmt((q[1] - opt.originY) * scale)}`;
-  let d = '';
-  for (const loop of traceLoops(mask, w, h)) {
-    if (Math.abs(area(loop)) < opt.minLoopArea) continue;
-    if (opt.shape === 'rect') {
-      const r = rectFromLoop(loop, opt.snapDeg);
-      if (r) d += segsToPath(r, S);
-      continue;
-    }
-    d += segsToPath(fitLoop(loop, opt), S);
-  }
-  return d;
-}

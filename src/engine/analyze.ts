@@ -86,13 +86,3 @@ export function analyzeLayers(labels: Uint8Array, w: number, h: number, layers: 
     nextToBackground: st.edge ? Math.round((st.edgeBg / st.edge) * 100) / 100 : 0,
   }));
 }
-
-/** 長方形に近い小さな色は自動で「四角」にする */
-export function autoShapes(layers: Layer[], stats: LayerStats[]): Layer[] {
-  return layers.map((l, i) => {
-    const s = stats[i];
-    if (!l.visible || l.shape !== 'smooth') return l;
-    if (s.islands >= 1 && s.islands <= 6 && s.rectangularity >= 0.9 && s.areaPct < 12) return { ...l, shape: 'rect' };
-    return l;
-  });
-}

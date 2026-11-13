@@ -25,7 +25,6 @@ import MagicWand from '@spectrum-icons/workflow/MagicWand';
 import Undo from '@spectrum-icons/workflow/Undo';
 import AlertCircle from '@spectrum-icons/workflow/AlertCircle';
 import { loadImage, runAnalyze, runBuild, runQuantize } from './engine/client';
-import { autoShapes } from './engine/analyze';
 import { applyPlan, buildPrompt, errorText, getDownloads, getSample, imageDataToBlob, svgToPng, type AiPlan } from './ai';
 import { toSvg, type BuildOptions, type BuildResult, type Layer } from './engine/build';
 import type { QuantizeResult } from './engine/quantize';
@@ -56,7 +55,7 @@ export default function App() {
   const [shape, setShape] = useState<ShapeOptions>({ colors: 6, shade: 0.7, smooth: 2, detail: 420, minDetailMm2: 1.5, background: 8 });
   const [build, setBuild] = useState<Omit<BuildOptions, 'minAreaPx'> & { lineWidthMm: number }>({
     sizeMm: 90,
-    overlapMm: 0.3,
+    overlapMm: 0.8,
     cleanup: 3,
     snap: true,
     lineWidthMm: 0.6,
@@ -129,15 +128,10 @@ export default function App() {
               origHex: c.hex,
               visible: !c.background,
               mode: 'fill',
-              shape: 'smooth',
+              shape: 'auto',
               offsetMm: 0,
-              underlay: false,
             }));
           setLayers(init);
-          // 長方形に近い色は自動で「四角」に
-          runAnalyze(q, init, Math.round(shape.minDetailMm2 * pxPerMm * pxPerMm)).then((st) => {
-            if (seq === quantSeq.current) setLayers((prev) => (prev === init ? autoShapes(init, st) : prev));
-          });
         })
         .finally(() => setBusy((b) => b - 1));
     }, 200);
@@ -459,7 +453,7 @@ export default function App() {
               <LiveSlider
                 label="色どうしの重なり"
                 min={0}
-                max={1.5}
+                max={3}
                 step={0.1}
                 value={build.overlapMm}
                 format={(v) => `${v.toFixed(1)} mm`}

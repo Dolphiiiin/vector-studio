@@ -1,5 +1,5 @@
 import type { Layer } from './engine/build';
-import type { ShapeMode } from './engine/fit';
+import type { ShapeMode } from './engine/shapes';
 import type { LayerStats } from './engine/analyze';
 
 type SampleFn = typeof Claude.sample;
@@ -63,18 +63,18 @@ ${JSON.stringify(rows)}
 Decide, for each region:
 - sew: false for fabric/paper background, cast shadows, reflections, photo noise, anything that is not part of the design itself.
 - mergeInto: the id of another region when both are the same thread color split only by lighting, shading or highlights (shading is not stitched as a separate color). null otherwise. Never merge distinct design colors.
-- shape: "rect" for parts that are meant to be rectangles (e.g. blocky eyes, cheeks, mouth), "straight" for parts with straight edges and sharp corners (borders, polygonal hair), "smooth" for organic curves.
+- shape: "auto" lets the app pick the simplest fitting shape per island (rectangle, rounded rectangle, ellipse, polygon, curve) and is right for most regions. Override only when the intent is clear: "rect" for parts meant to be rectangles even if the photo is distorted, "straight" for straight-edged polygons, "smooth" for organic curves.
 - name: a 1-4 word Japanese name of what the region is (e.g. 顔, 髪, 目, ほっぺ, 縁取り, 影).
 Then give the stitching order of the regions that remain sewn: large base fills first, small details on top later, an outer border or outline last.
 
 Reply with only JSON in this shape:
-{"layers":[{"id":"c0","name":"顔","sew":true,"mergeInto":null,"shape":"smooth"}],"order":["c0"]}`;
+{"layers":[{"id":"c0","name":"顔","sew":true,"mergeInto":null,"shape":"auto"}],"order":["c0"]}`;
 }
 
 /** 返ってきた判断を、いまの色の一覧に当てはめる（不正な値は無視） */
 export function applyPlan(layers: Layer[], plan: AiPlan): Layer[] {
   const byKey = new Map(layers.map((l) => [l.key, { ...l }]));
-  const shapes: ShapeMode[] = ['smooth', 'straight', 'rect'];
+  const shapes: ShapeMode[] = ['auto', 'smooth', 'straight', 'rect'];
   const items = Array.isArray(plan?.layers) ? plan.layers : [];
   for (const a of items) {
     const l = byKey.get(String(a?.id));

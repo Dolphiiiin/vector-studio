@@ -15,9 +15,9 @@ export interface FitOptions {
   shape: ShapeMode;
 }
 
-export type ShapeMode = 'smooth' | 'straight' | 'rect';
+export type ShapeMode = 'smooth' | 'straight';
 
-type Seg =
+export type Seg =
   | { kind: 'L'; a: Pt; b: Pt }
   | { kind: 'C'; a: Pt; c1: Pt; c2: Pt; b: Pt };
 
@@ -317,45 +317,3 @@ export function segsToPath(segs: Seg[], S: (p: Pt) => string): string {
   return d + 'Z';
 }
 
-/** 同じ面積・重心・向きの長方形に置き換える（外側の輪郭のみ） */
-export function rectFromLoop(p: Pt[], snapDeg: number): Seg[] | null {
-  let A = 0, cx = 0, cy = 0, xx = 0, yy = 0, xy = 0;
-  for (let i = 0; i < p.length; i++) {
-    const [x0, y0] = p[i], [x1, y1] = p[(i + 1) % p.length];
-    const c = x0 * y1 - x1 * y0;
-    A += c;
-    cx += (x0 + x1) * c;
-    cy += (y0 + y1) * c;
-    xx += (x0 * x0 + x0 * x1 + x1 * x1) * c;
-    yy += (y0 * y0 + y0 * y1 + y1 * y1) * c;
-    xy += (x0 * y1 + 2 * x0 * y0 + 2 * x1 * y1 + x1 * y0) * c;
-  }
-  A /= 2;
-  if (A <= 0) return null; // 穴
-  cx /= 6 * A; cy /= 6 * A;
-  const vx = xx / 12 / A - cx * cx, vy = yy / 12 / A - cy * cy, vxy = xy / 24 / A - cx * cy;
-  // 向き：外接矩形の面積が最小になる角度（正方形でも安定）
-  let th = 0, best = Infinity;
-  for (let deg = 0; deg < 90; deg += 1) {
-    const r = (deg * Math.PI) / 180, co = Math.cos(r), si = Math.sin(r);
-    let u0 = Infinity, u1 = -Infinity, v0 = Infinity, v1 = -Infinity;
-    for (const [x, y] of p) {
-      const pu = x * co + y * si, pv = -x * si + y * co;
-      if (pu < u0) u0 = pu; if (pu > u1) u1 = pu;
-      if (pv < v0) v0 = pv; if (pv > v1) v1 = pv;
-    }
-    const ar = (u1 - u0) * (v1 - v0);
-    if (ar < best - 1e-9) { best = ar; th = r; }
-  }
-  if (th > Math.PI / 4) th -= Math.PI / 2;
-  const snapRad = ((snapDeg || 0) * Math.PI) / 180;
-  if (Math.abs(th) <= snapRad) th = 0;
-  const u: Pt = [Math.cos(th), Math.sin(th)], v: Pt = [-Math.sin(th), Math.cos(th)];
-  // 角度を決めたあとの軸方向の分散 → 同じ面積の長方形の辺
-  const vu = vx * u[0] * u[0] + 2 * vxy * u[0] * u[1] + vy * u[1] * u[1];
-  const vv = vx * v[0] * v[0] + 2 * vxy * v[0] * v[1] + vy * v[1] * v[1];
-  const a = Math.sqrt(12 * Math.max(vu, 0)) / 2, b = Math.sqrt(12 * Math.max(vv, 0)) / 2;
-  const c: Pt = [cx, cy];
-  const P = [add(add(c, mul(u, -a)), mul(v, -b)), add(add(c, mul(u, a)), mul(v, -b)), add(add(c, mul(u, a)), mul(v, b)), add(add(c, mul(u, -a)), mul(v, b))];
-  return P.map((pt, i) => ({ kind: 'L' as const, a: pt, b: P[(i + 1) % 4] }));
-}
