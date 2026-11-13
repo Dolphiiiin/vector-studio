@@ -52,8 +52,8 @@ export default function App() {
   const [build, setBuild] = useState<Omit<BuildOptions, 'minAreaPx'> & { lineWidthMm: number }>({
     sizeMm: 90,
     overlapMm: 0.3,
-    simplify: 1,
-    curve: true,
+    cleanup: 3,
+    snap: true,
     lineWidthMm: 0.6,
   });
   const [hoopKey, setHoopKey] = useState('100x100');
@@ -112,6 +112,7 @@ export default function App() {
               origHex: c.hex,
               visible: !c.background,
               mode: 'fill',
+              shape: 'smooth',
               offsetMm: 0,
               underlay: false,
             })),
@@ -332,13 +333,13 @@ export default function App() {
                 onCommit={(v) => setShape((s) => ({ ...s, minDetailMm2: v }))}
               />
               <LiveSlider
-                label="輪郭の単純化"
-                min={0.3}
-                max={3}
-                step={0.1}
-                value={build.simplify}
+                label="形を整える"
+                min={0}
+                max={4}
+                step={0.5}
+                value={build.cleanup}
                 format={(v) => v.toFixed(1)}
-                onCommit={(v) => setBuild((s) => ({ ...s, simplify: v }))}
+                onCommit={(v) => setBuild((s) => ({ ...s, cleanup: v }))}
               />
               <LiveSlider
                 label="解析の細かさ"
@@ -349,8 +350,8 @@ export default function App() {
                 format={(v) => `${v} px`}
                 onCommit={(v) => setShape((s) => ({ ...s, detail: v }))}
               />
-              <Switch isSelected={build.curve} onChange={(v) => setBuild((s) => ({ ...s, curve: v }))}>
-                曲線でなめらかに
+              <Switch isSelected={build.snap} onChange={(v) => setBuild((s) => ({ ...s, snap: v }))}>
+                水平・垂直にそろえる
               </Switch>
             </div>
           </Item>

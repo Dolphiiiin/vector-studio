@@ -80,6 +80,7 @@ export function LayerList({ layers, areas, selected, onSelect, onUpdate, onReord
                 <span className="hex">{l.hex.toUpperCase()}</span>
                 <span className="sub">
                   {l.mode === 'line' ? '線' : '塗り'}
+                  {l.shape === 'straight' ? '  直線' : l.shape === 'rect' ? '  四角' : ''}
                   {l.visible && area > 0 ? `  ${area.toFixed(0)} mm²` : ''}
                 </span>
               </div>
@@ -104,6 +105,19 @@ export function LayerList({ layers, areas, selected, onSelect, onUpdate, onReord
                 >
                   <Item key="fill">塗り</Item>
                   <Item key="line">線</Item>
+                </ActionGroup>
+                <ActionGroup
+                  aria-label="形"
+                  selectionMode="single"
+                  disallowEmptySelection
+                  selectedKeys={[l.shape]}
+                  onSelectionChange={(s) => onUpdate(l.key, { shape: [...s][0] as Layer['shape'] })}
+                  density="compact"
+                  isJustified
+                >
+                  <Item key="smooth">なめらか</Item>
+                  <Item key="straight">直線</Item>
+                  <Item key="rect">四角</Item>
                 </ActionGroup>
                 <LiveSlider
                   label="余白"

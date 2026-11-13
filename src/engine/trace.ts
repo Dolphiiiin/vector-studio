@@ -1,4 +1,4 @@
-type Pt = [number, number];
+import { fitLoop, rectFromLoop, segsToPath, type FitOptions, type Pt } from './fit';
 
 /** 2パスのチャンファー距離変換（3-4）。mask 内側の各画素について外側までの距離(px)を返す */
 function distance(mask: Uint8Array, w: number, h: number, inside: boolean): Float32Array {
@@ -123,41 +123,6 @@ function traceLoops(mask: Uint8Array, w: number, h: number): Pt[][] {
   return loops;
 }
 
-function rdp(pts: Pt[], eps: number): Pt[] {
-  if (pts.length < 3) return pts;
-  const keep = new Uint8Array(pts.length);
-  keep[0] = keep[pts.length - 1] = 1;
-  const stack: [number, number][] = [[0, pts.length - 1]];
-  while (stack.length) {
-    const [s, e] = stack.pop()!;
-    const [x1, y1] = pts[s], [x2, y2] = pts[e];
-    const dx = x2 - x1, dy = y2 - y1;
-    const len = Math.hypot(dx, dy) || 1;
-    let md = 0, mi = -1;
-    for (let i = s + 1; i < e; i++) {
-      const dd = Math.abs(dy * pts[i][0] - dx * pts[i][1] + x2 * y1 - y2 * x1) / len;
-      if (dd > md) { md = dd; mi = i; }
-    }
-    if (md > eps && mi > 0) {
-      keep[mi] = 1;
-      stack.push([s, mi], [mi, e]);
-    }
-  }
-  return pts.filter((_, i) => keep[i]);
-}
-
-function simplifyClosed(loop: Pt[], eps: number): Pt[] {
-  // 最も離れた2点で分割してから RDP
-  let far = 0, fd = 0;
-  for (let i = 1; i < loop.length; i++) {
-    const d = (loop[i][0] - loop[0][0]) ** 2 + (loop[i][1] - loop[0][1]) ** 2;
-    if (d > fd) { fd = d; far = i; }
-  }
-  const a = rdp(loop.slice(0, far + 1), eps);
-  const b = rdp([...loop.slice(far), loop[0]], eps);
-  return [...a.slice(0, -1), ...b.slice(0, -1)];
-}
-
 function area(loop: Pt[]) {
   let s = 0;
   for (let i = 0; i < loop.length; i++) {
@@ -169,45 +134,23 @@ function area(loop: Pt[]) {
 
 const fmt = (v: number) => (Math.round(v * 100) / 100).toString();
 
-function loopToPath(p: Pt[], scale: number, ox: number, oy: number, curve: boolean): string {
-  const n = p.length;
-  const S = (q: Pt) => `${fmt((q[0] - ox) * scale)} ${fmt((q[1] - oy) * scale)}`;
-  if (!curve || n < 4) return 'M' + p.map(S).join('L') + 'Z';
-  // 角度が急な点は角として残し、それ以外は Catmull-Rom を 3次ベジェに
-  const corner = p.map((c, i) => {
-    const a = p[(i - 1 + n) % n], b = p[(i + 1) % n];
-    const v1x = c[0] - a[0], v1y = c[1] - a[1], v2x = b[0] - c[0], v2y = b[1] - c[1];
-    const cos = (v1x * v2x + v1y * v2y) / ((Math.hypot(v1x, v1y) * Math.hypot(v2x, v2y)) || 1);
-    return cos < 0.55; // 約57°以上曲がる点
-  });
-  let d = 'M' + S(p[0]);
-  for (let i = 0; i < n; i++) {
-    const p0 = p[(i - 1 + n) % n], p1 = p[i], p2 = p[(i + 1) % n], p3 = p[(i + 2) % n];
-    const t = 1 / 6;
-    const c1: Pt = corner[i] ? p1 : [p1[0] + (p2[0] - p0[0]) * t, p1[1] + (p2[1] - p0[1]) * t];
-    const c2: Pt = corner[(i + 1) % n] ? p2 : [p2[0] - (p3[0] - p1[0]) * t, p2[1] - (p3[1] - p1[1]) * t];
-    if (corner[i] && corner[(i + 1) % n]) d += 'L' + S(p2);
-    else d += 'C' + S(c1) + ' ' + S(c2) + ' ' + S(p2);
-  }
-  return d + 'Z';
-}
-
-export interface TraceOptions {
+export interface TraceOptions extends FitOptions {
   originX: number;
   originY: number;
-  simplify: number; // px
-  curve: boolean;
   minLoopArea: number; // px²
 }
 
 export function maskToPath(mask: Uint8Array, w: number, h: number, scale: number, opt: TraceOptions): string {
-  const loops = traceLoops(mask, w, h);
+  const S = (q: Pt) => `${fmt((q[0] - opt.originX) * scale)} ${fmt((q[1] - opt.originY) * scale)}`;
   let d = '';
-  for (const loop of loops) {
+  for (const loop of traceLoops(mask, w, h)) {
     if (Math.abs(area(loop)) < opt.minLoopArea) continue;
-    const s = simplifyClosed(loop, opt.simplify);
-    if (s.length < 3) continue;
-    d += loopToPath(s, scale, opt.originX, opt.originY, opt.curve);
+    if (opt.shape === 'rect') {
+      const r = rectFromLoop(loop, opt.snapDeg);
+      if (r) d += segsToPath(r, S);
+      continue;
+    }
+    d += segsToPath(fitLoop(loop, opt), S);
   }
   return d;
 }
