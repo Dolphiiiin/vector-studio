@@ -16,6 +16,7 @@ import ChevronUp from '@spectrum-icons/workflow/ChevronUp';
 import ChevronDown from '@spectrum-icons/workflow/ChevronDown';
 import Merge from '@spectrum-icons/workflow/Merge';
 import Undo from '@spectrum-icons/workflow/Undo';
+import Unlink from '@spectrum-icons/workflow/Unlink';
 import type { BuiltLayer, Layer } from './engine/build';
 import { LiveSlider } from './LiveSlider';
 
@@ -32,9 +33,10 @@ interface Props {
   onSelect: (key: string | null) => void;
   onUpdate: (key: string, patch: Partial<Layer>) => void;
   onReorder: (layers: Layer[]) => void;
+  clusterHex: string[];
 }
 
-export function LayerList({ layers, areas, selected, onSelect, onUpdate, onReorder }: Props) {
+export function LayerList({ layers, areas, selected, onSelect, onUpdate, onReorder, clusterHex }: Props) {
   let n = 0;
   const move = (i: number, d: number) => {
     const j = i + d;
@@ -51,6 +53,21 @@ export function LayerList({ layers, areas, selected, onSelect, onUpdate, onReord
         .map((l) => (l.key === into ? { ...l, members: [...l.members, ...src.members] } : l)),
     );
     onSelect(into);
+  };
+
+  // まとめた色を元の色に分ける（柄が 1 色にまとまってしまったとき）
+  const split = (key: string) => {
+    const i = layers.findIndex((l) => l.key === key);
+    const l = layers[i];
+    const parts: Layer[] = l.members.map((m, k) => ({
+      ...l,
+      key: `${l.key}.${m}`,
+      members: [m],
+      hex: k === 0 ? l.hex : clusterHex[m] ?? l.hex,
+      origHex: clusterHex[m] ?? l.origHex,
+    }));
+    onReorder([...layers.slice(0, i), ...parts, ...layers.slice(i + 1)]);
+    onSelect(parts[0].key);
   };
 
   return (
@@ -83,6 +100,7 @@ export function LayerList({ layers, areas, selected, onSelect, onUpdate, onReord
                 </span>
                 <span className="sub">
                   {l.mode === 'line' ? '線' : '塗り'}
+                  {l.members.length > 1 ? `  ${l.members.length}色をまとめ` : ''}
                   {l.shape === 'straight' ? '  直線' : l.shape === 'rect' ? '  四角' : l.shape === 'smooth' ? '  曲線' : ''}
                   {l.visible && area > 0 ? `  ${area.toFixed(0)} mm²` : ''}
                 </span>
@@ -141,6 +159,12 @@ export function LayerList({ layers, areas, selected, onSelect, onUpdate, onReord
                     <ChevronDown />
                     <Text>後に縫う</Text>
                   </ActionButton>
+                  {l.members.length > 1 && (
+                    <ActionButton onPress={() => split(l.key)}>
+                      <Unlink />
+                      <Text>色を分ける</Text>
+                    </ActionButton>
+                  )}
                   <MenuTrigger>
                     <ActionButton isDisabled={layers.length < 2}>
                       <Merge />

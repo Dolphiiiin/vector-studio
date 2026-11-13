@@ -33,18 +33,20 @@ export interface AiLayer {
   sew?: boolean;
   shape?: ShapeMode;
   mergeInto?: string | null;
+  split?: boolean;
 }
 export interface AiPlan {
   layers: AiLayer[];
   order?: string[];
 }
 
-export function buildPrompt(layers: Layer[], stats: LayerStats[]): string {
+export function buildPrompt(layers: Layer[], stats: LayerStats[], clusterHex: string[]): string {
   const rows = layers.map((l, i) => {
     const s = stats[i];
     return {
       id: l.key,
       color: l.hex,
+      ...(l.members.length > 1 ? { mergedTones: l.members.map((m) => clusterHex[m]) } : {}),
       sew: l.visible,
       shape: l.shape,
       areaPct: s?.areaPct,
@@ -62,6 +64,7 @@ ${JSON.stringify(rows)}
 
 Decide, for each region:
 - sew: false for fabric/paper background, cast shadows, reflections, photo noise, anything that is not part of the design itself.
+- split: true when a region with mergedTones (shades the app merged as one thread) is actually a pattern (stripes, dots, checks, printed motif) whose tones should be stitched as separate colors. Omit otherwise.
 - mergeInto: the id of another region when both are the same thread color split only by lighting, shading or highlights (this design uses no gradients: every shade of one hue is one thread). null otherwise. Never merge distinct design colors.
 - shape: "auto" lets the app pick the simplest fitting shape per island (rectangle, rounded rectangle, ellipse, polygon, curve) and is right for most regions. Override only when the intent is clear: "rect" for parts meant to be rectangles even if the photo is distorted, "straight" for straight-edged polygons, "smooth" for organic curves.
 - name: a 1-4 word Japanese name of what the region is (e.g. 顔, 髪, 目, ほっぺ, 縁取り, 影).
@@ -72,7 +75,15 @@ Reply with only JSON in this shape:
 }
 
 /** 返ってきた判断を、いまの色の一覧に当てはめる（不正な値は無視） */
-export function applyPlan(layers: Layer[], plan: AiPlan): Layer[] {
+export function applyPlan(input: Layer[], plan: AiPlan, clusterHex: string[]): Layer[] {
+  const items0 = Array.isArray(plan?.layers) ? plan.layers : [];
+  // 柄と判断された色は、まとめる前の色に分ける（分けた色は元の id に .n を付ける）
+  const splitIds = new Set(items0.filter((a) => a?.split === true).map((a) => String(a.id)));
+  const layers: Layer[] = input.flatMap((l) =>
+    splitIds.has(l.key) && l.members.length > 1
+      ? l.members.map((m, k) => ({ ...l, key: `${l.key}.${m}`, members: [m], hex: k === 0 ? l.hex : clusterHex[m] ?? l.hex, origHex: clusterHex[m] ?? l.origHex }))
+      : [l],
+  );
   const byKey = new Map(layers.map((l) => [l.key, { ...l }]));
   const shapes: ShapeMode[] = ['auto', 'smooth', 'straight', 'rect'];
   const items = Array.isArray(plan?.layers) ? plan.layers : [];

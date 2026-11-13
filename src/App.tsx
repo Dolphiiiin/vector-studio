@@ -127,16 +127,20 @@ export default function App() {
           setQuant(q);
           setBeforeAi(null);
           setAiError(null);
-          const init: Layer[] = q.clusters.map((c) => ({
-              key: `c${c.id}`,
-              members: [c.id],
+          // グラデーションの濃淡はまとめた状態で始める（各色の「色を分ける」で戻せる）
+          const init: Layer[] = q.groups.map((g) => {
+            const c = q.clusters[g[0]];
+            return {
+              key: `c${g.join('-')}`,
+              members: g,
               hex: c.hex,
               origHex: c.hex,
               visible: !c.background,
               mode: 'fill',
               shape: 'auto',
               offsetMm: 0,
-            }));
+            };
+          });
           setLayers(init);
         })
         .finally(() => setBusy((b) => b - 1));
@@ -198,9 +202,9 @@ export default function App() {
       const pxPerMm = Math.max(quant.width, quant.height) / build.sizeMm;
       const stats = await runAnalyze(quant, base, Math.round(shape.minDetailMm2 * pxPerMm * pxPerMm));
       const images = [await imageDataToBlob(image), await svgToPng(svgText)];
-      const plan = await sample.json<AiPlan>(buildPrompt(base, stats), { images, modelTier: 'quick', signal: ctl.signal });
+      const plan = await sample.json<AiPlan>(buildPrompt(base, stats, quant.clusters.map((c) => c.hex)), { images, modelTier: 'quick', signal: ctl.signal });
       setBeforeAi(base);
-      setLayers(applyPlan(base, plan));
+      setLayers(applyPlan(base, plan, quant.clusters.map((c) => c.hex)));
       setSelected(null);
     } catch (e) {
       const code = (e as { code?: string })?.code ?? '';
@@ -382,6 +386,7 @@ export default function App() {
                 onSelect={setSelected}
                 onUpdate={updateLayer}
                 onReorder={setLayers}
+                clusterHex={quant?.clusters.map((c) => c.hex) ?? []}
               />
             </div>
           </Item>

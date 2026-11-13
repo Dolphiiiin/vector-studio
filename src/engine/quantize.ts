@@ -23,6 +23,8 @@ export interface QuantizeResult {
   height: number;
   labels: Uint8Array;
   clusters: Cluster[];
+  /** 1 色にまとめる候補（クラスタ id の組）。グラデーション・陰影の濃淡を同じ糸に */
+  groups: number[][];
 }
 
 function mulberry32(seed: number) {
@@ -232,21 +234,27 @@ function dissolveFringes(labels: Uint8Array, w: number, h: number, k: number, pr
  * 背景に大きく接している小さな島（パッチの側面や落ち影）を背景にする。
  * 縁取りのように大きな部分は面積で除外される。
  */
-function dropShadowIslands(labels: Uint8Array, w: number, h: number, bgLabel: number) {
-  let fg = 0;
-  for (let p = 0; p < labels.length; p++) if (labels[p] !== bgLabel) fg++;
+function dropShadowIslands(labels: Uint8Array, w: number, h: number, bgLabel: number, L: Float32Array) {
+  let fg = 0, bgL = 0, bgN = 0;
+  for (let p = 0; p < labels.length; p++) {
+    if (labels[p] !== bgLabel) fg++;
+    else { bgL += L[p]; bgN++; }
+  }
+  bgL /= Math.max(1, bgN);
   const seen = new Uint8Array(labels.length);
-  const comp: number[] = [];
+  const drop: number[][] = [];
+  const maxThick = Math.max(w, h) * 0.03;
   for (let s = 0; s < labels.length; s++) {
     if (seen[s] || labels[s] === bgLabel) continue;
     const c = labels[s];
-    comp.length = 0;
-    let edge = 0, edgeBg = 0;
+    const comp: number[] = [];
+    let edge = 0, edgeBg = 0, sumL = 0;
     const st = [s];
     seen[s] = 1;
     while (st.length) {
       const p = st.pop()!;
       comp.push(p);
+      sumL += L[p];
       const x = p % w, y = (p / w) | 0;
       for (const q of [x > 0 ? p - 1 : -1, x < w - 1 ? p + 1 : -1, y > 0 ? p - w : -1, y < h - 1 ? p + w : -1]) {
         if (q < 0) { edge++; edgeBg++; continue; }
@@ -258,8 +266,13 @@ function dropShadowIslands(labels: Uint8Array, w: number, h: number, bgLabel: nu
         }
       }
     }
-    if (comp.length < fg * 0.05 && edgeBg / edge >= 0.35) for (const p of comp) labels[p] = bgLabel;
+    // 影・パッチの側面：小さく、細く（帯状）、布より暗く、背景に大きく接している
+    const thick = (2 * comp.length) / Math.max(1, edge);
+    const darker = sumL / comp.length < bgL - 10;
+    if (comp.length < fg * 0.05 && thick < maxThick && darker && edgeBg / edge >= 0.35) drop.push(comp);
   }
+  // 判定がすべて終わってから消す（消した島に接した隣の島が連鎖で消えないように）
+  for (const comp of drop) for (const p of comp) labels[p] = bgLabel;
 }
 
 /** 写真のくすみを取る：明るい無彩色は白、暗い色は黒、色のある色は彩度を上げる */
@@ -407,7 +420,7 @@ export function quantize(img: ImageData, opt: QuantizeOptions): QuantizeResult {
   absorbSmall(labels, w, h, K, opt.minArea);
   absorbSmall(labels, w, h, K, opt.minArea);
   dissolveFringes(labels, w, h, K, hasBg ? k : -1);
-  if (hasBg) dropShadowIslands(labels, w, h, k);
+  if (hasBg) dropShadowIslands(labels, w, h, k, L);
 
   // 代表色：明度は中央値より少し明るめ（陰影ではなく「地の色」を採る）、色相は平均
   const lValues: number[][] = Array.from({ length: K }, () => []);
@@ -437,7 +450,13 @@ export function quantize(img: ImageData, opt: QuantizeOptions): QuantizeResult {
     };
   });
 
-  const res = opt.flatten ? flattenTones(labels, clusters) : { width: w, height: h, labels, clusters };
+  const res: QuantizeResult = {
+    width: w,
+    height: h,
+    labels,
+    clusters,
+    groups: opt.flatten ? toneGroups(labels, clusters) : clusters.map((c) => [c.id]),
+  };
   if (opt.details) addDetails(res);
   if (opt.vivid) for (const c of res.clusters) if (!c.background) c.hex = idealize(c.hex);
   return res;
@@ -461,8 +480,11 @@ export function quantize(img: ImageData, opt: QuantizeOptions): QuantizeResult {
     const seen = new Uint8Array(n);
     let sr = 0, sg = 0, sb = 0, cnt = 0;
     const keep: number[] = [];
+    // 下地の色は、まとめた後の代表色で見る（グラデーションの明るい側と比べない）
+    const repOf = r.clusters.map((c) => c.id);
+    for (const g of r.groups) for (const m of g) repOf[m] = g[0];
     const labOf = r.clusters.map((c) => {
-      const v = parseInt(c.hex.slice(1), 16);
+      const v = parseInt(r.clusters[repOf[c.id]].hex.slice(1), 16);
       return rgbToLab((v >> 16) & 255, (v >> 8) & 255, v & 255);
     });
     const under = new Uint32Array(r.clusters.length);
@@ -505,48 +527,83 @@ export function quantize(img: ImageData, opt: QuantizeOptions): QuantizeResult {
     let hex = toHex([Math.round(sr / cnt), Math.round(sg / cnt), Math.round(sb / cnt)]);
     if (opt.vivid) hex = idealize(hex);
     r.clusters.push({ id, hex, count: keep.length, background: false });
+    r.groups.push([id]);
   }
 
   /**
-   * 色味（色相）が同じで明るさだけ違う色を 1 色にまとめる。代表色は面積がいちばん大きい色。
-   * 白・灰・黒のような色味のない色は明るさが別の色として残す（目の黒と縁取りの灰など）。
+   * 同じ色味で明るさだけ違う色（グラデーション・陰影）を 1 色にまとめる組を作る。
+   * ただし柄（ストライプ・水玉・チェックなど）は残す：
+   *  - 隣り合っていない色どうしはまとめない
+   *  - 明るさの差が大きい色（紺と水色など）はまとめない
+   *  - 似た大きさの島がいくつも並ぶ色は柄とみなしてまとめない
+   * 白・灰・黒は、明るさがほぼ同じときだけまとめる。
    */
-  function flattenTones(lab: Uint8Array, cs: Cluster[]): QuantizeResult {
-    const HUE_TOL = 25, CHROMA_MIN = 12;
+  function toneGroups(lab: Uint8Array, cs: Cluster[]): number[][] {
+    const HUE_TOL = 25, CHROMA_MIN = 12, MAX_DL = 32;
+    const K = cs.length;
     const info = cs.map((c) => {
-      const n = parseInt(c.hex.slice(1), 16);
-      const [l, a, b] = rgbToLab((n >> 16) & 255, (n >> 8) & 255, n & 255);
+      const v = parseInt(c.hex.slice(1), 16);
+      const [l, a, b] = rgbToLab((v >> 16) & 255, (v >> 8) & 255, v & 255);
       return { l, c: Math.hypot(a, b), h: (Math.atan2(b, a) * 180) / Math.PI };
     });
+    // 隣り合っている長さ
+    const touch = new Uint32Array(K * K);
+    for (let y = 0; y < h; y++)
+      for (let x = 0; x < w; x++) {
+        const p = y * w + x, i = lab[p];
+        if (x + 1 < w && lab[p + 1] !== i) touch[Math.min(i, lab[p + 1]) * K + Math.max(i, lab[p + 1])]++;
+        if (y + 1 < h && lab[p + w] !== i) touch[Math.min(i, lab[p + w]) * K + Math.max(i, lab[p + w])]++;
+      }
+    // 色ごとの島の大きさ → 柄らしさ（似た大きさの島が 3 つ以上）
+    const islands: number[][] = Array.from({ length: K }, () => []);
+    const seen = new Uint8Array(lab.length);
+    for (let s0 = 0; s0 < lab.length; s0++) {
+      if (seen[s0]) continue;
+      const c = lab[s0];
+      let size = 0;
+      const st = [s0];
+      seen[s0] = 1;
+      while (st.length) {
+        const p = st.pop()!;
+        size++;
+        const x = p % w;
+        for (const q of [x > 0 ? p - 1 : -1, x < w - 1 ? p + 1 : -1, p - w, p + w]) {
+          if (q >= 0 && q < lab.length && !seen[q] && lab[q] === c) { seen[q] = 1; st.push(q); }
+        }
+      }
+      if (size >= Math.max(opt.minArea, 20)) islands[c].push(size);
+    }
+    const patterned = islands.map((sz) => {
+      if (sz.length < 3) return false;
+      const sorted = sz.slice().sort((a, b) => b - a).slice(0, 12);
+      const mean = sorted.reduce((a, b) => a + b, 0) / sorted.length;
+      const sd = Math.sqrt(sorted.reduce((a, b) => a + (b - mean) ** 2, 0) / sorted.length);
+      return sd / mean < 0.6;
+    });
+
     const parent = cs.map((_, i) => i);
     const find = (i: number): number => (parent[i] === i ? i : (parent[i] = find(parent[i])));
-    for (let i = 0; i < cs.length; i++)
-      for (let j = i + 1; j < cs.length; j++) {
+    for (let i = 0; i < K; i++)
+      for (let j = i + 1; j < K; j++) {
         if (cs[i].background || cs[j].background) continue;
         const p = info[i], q = info[j];
+        const dl = Math.abs(p.l - q.l);
+        if (p.c < CHROMA_MIN && q.c < CHROMA_MIN) {
+          if (dl < 6) parent[find(i)] = find(j);
+          continue;
+        }
         const dh = Math.abs(((p.h - q.h + 540) % 360) - 180);
-        const sameHue = p.c >= CHROMA_MIN && q.c >= CHROMA_MIN && dh <= HUE_TOL;
-        const sameNeutral = p.c < CHROMA_MIN && q.c < CHROMA_MIN && Math.abs(p.l - q.l) < 6;
-        if (sameHue || sameNeutral) parent[find(i)] = find(j);
+        if (p.c < CHROMA_MIN || q.c < CHROMA_MIN || dh > HUE_TOL) continue;
+        if (touch[i * K + j] < 8 || dl > MAX_DL) continue;
+        if (patterned[i] || patterned[j]) continue;
+        parent[find(i)] = find(j);
       }
-    // グループごとに、面積最大の色を代表に
-    const rep = new Map<number, number>();
-    cs.forEach((c, i) => {
-      const r = find(i);
-      const cur = rep.get(r);
-      if (cur === undefined || cs[cur].count < c.count) rep.set(r, i);
-    });
-    const groups = [...rep.entries()]
-      .map(([root, ri]) => ({ root, ri, count: cs.reduce((s, c, i) => s + (find(i) === root ? c.count : 0), 0) }))
-      .sort((a, b) => b.count - a.count);
-    const newId = new Uint8Array(256);
-    cs.forEach((_, i) => (newId[i] = groups.findIndex((g) => g.root === find(i))));
-    const out = lab.map((v) => newId[v]);
-    return {
-      width: w,
-      height: h,
-      labels: out,
-      clusters: groups.map((g, i) => ({ id: i, hex: cs[g.ri].hex, count: g.count, background: cs[g.ri].background })),
-    };
+    const groups = new Map<number, number[]>();
+    for (let i = 0; i < K; i++) groups.set(find(i), [...(groups.get(find(i)) ?? []), i]);
+    // 面積の大きい順（クラスタ id は面積順なので先頭が代表色）
+    return [...groups.values()]
+      .map((g) => g.sort((a, b) => a - b))
+      .sort((a, b) => b.reduce((s, i) => s + cs[i].count, 0) - a.reduce((s, i) => s + cs[i].count, 0));
   }
+
 }
