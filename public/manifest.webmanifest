@@ -1,0 +1,9 @@
+{
+  "name": "刺繍SVG",
+  "short_name": "刺繍SVG",
+  "start_url": ".",
+  "display": "standalone",
+  "background_color": "#1d1d1d",
+  "theme_color": "#1d1d1d",
+  "icons": [{ "src": "icon.svg", "sizes": "any", "type": "image/svg+xml" }]
+}
