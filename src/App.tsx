@@ -39,6 +39,8 @@ interface ShapeOptions {
   minDetailMm2: number;
   background: number;
   flatten: boolean;
+  vivid: boolean;
+  details: boolean;
 }
 
 const HOOPS = [
@@ -53,7 +55,7 @@ export default function App() {
   const [file, setFile] = useState<File | null>(null);
   const [srcUrl, setSrcUrl] = useState<string | null>(null);
   const [image, setImage] = useState<ImageData | null>(null);
-  const [shape, setShape] = useState<ShapeOptions>({ colors: 6, shade: 0.7, smooth: 2, detail: 420, minDetailMm2: 1.5, background: 8, flatten: true });
+  const [shape, setShape] = useState<ShapeOptions>({ colors: 8, shade: 0.7, smooth: 2, detail: 420, minDetailMm2: 1.5, background: 8, flatten: true, vivid: true, details: true });
   const [build, setBuild] = useState<Omit<BuildOptions, 'minAreaPx'> & { lineWidthMm: number }>({
     sizeMm: 90,
     overlapMm: 0.8,
@@ -117,6 +119,8 @@ export default function App() {
         minArea: Math.round(shape.minDetailMm2 * pxPerMm * pxPerMm),
         background: shape.background,
         flatten: shape.flatten,
+        vivid: shape.vivid,
+        details: shape.details,
       })
         .then((q) => {
           if (seq !== quantSeq.current) return;
@@ -140,7 +144,7 @@ export default function App() {
     return () => clearTimeout(t);
     // sizeMm は小領域の判定にだけ使うので、変更のたびに作り直さない
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [image, shape.colors, shape.shade, shape.smooth, shape.minDetailMm2, shape.background, shape.flatten]);
+  }, [image, shape.colors, shape.shade, shape.smooth, shape.minDetailMm2, shape.background, shape.flatten, shape.vivid, shape.details]);
 
   // ベクター化
   useEffect(() => {
@@ -386,6 +390,12 @@ export default function App() {
               <LiveSlider label="色数" min={2} max={16} step={1} value={shape.colors} onCommit={(v) => setShape((s) => ({ ...s, colors: v }))} />
               <Switch isSelected={shape.flatten} onChange={(v) => setShape((s) => ({ ...s, flatten: v }))}>
                 グラデーションを1色にまとめる
+              </Switch>
+              <Switch isSelected={shape.vivid} onChange={(v) => setShape((s) => ({ ...s, vivid: v }))}>
+                くすみを取る
+              </Switch>
+              <Switch isSelected={shape.details} onChange={(v) => setShape((s) => ({ ...s, details: v }))}>
+                細い線を残す
               </Switch>
               <LiveSlider
                 label="陰影を消す"

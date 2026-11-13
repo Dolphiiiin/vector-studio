@@ -104,7 +104,7 @@ export function buildLayers(
   const layerOf = new Uint8Array(256).fill(255);
   layers.forEach((l, i) => l.members.forEach((m) => (layerOf[m] = i)));
   labels = labels.map((v) => layerOf[v]);
-  const r = Math.min(2, Math.round(opt.cleanup));
+  const r = Math.min(1, Math.round(opt.cleanup));
   if (r > 0) majority(labels, w, h, layers.length, r);
   const orderOf = new Int16Array(256).fill(-1);
   layers.forEach((l, i) => {
@@ -150,6 +150,7 @@ export function buildLayers(
   // 2. 輪郭ごとに、いちばん単純で十分に合う図形を当てはめる
   const shapeOpt = {
     tol: 0.5 + opt.cleanup * 0.45,
+    minRadius: pxPerMm,
     snapDeg: opt.snap ? 7 : 0,
     smooth: {
       smooth: 0.6 + opt.cleanup * 0.9,

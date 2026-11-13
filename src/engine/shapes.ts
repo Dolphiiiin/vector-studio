@@ -26,6 +26,7 @@ export type Prim = RectPrim | EllipsePrim | PathPrim;
 
 export interface ShapeOptions {
   tol: number; // 許容する平均のずれ（px）
+  minRadius: number; // これより小さい角の丸みは刺繍のにじみとみなして角にする（px）
   snapDeg: number;
   smooth: FitOptions; // 曲線にするときの設定
 }
@@ -354,7 +355,7 @@ export function fitShape(raw: Pt[], mode: ShapeMode, opt: ShapeOptions): Prim {
   const cands: Cand[] = [];
   cands.push({ prim: rect, poly: primPolygon(rect) });
   const short = Math.min(rect.w, rect.h);
-  for (const f of [0.15, 0.3, 0.5]) {
+  for (const f of [0.03, 0.06, 0.12, 0.25]) {
     const rr: RectPrim = { ...rect, r: short * f };
     cands.push({ prim: rr, poly: primPolygon(rr) });
   }
@@ -362,6 +363,17 @@ export function fitShape(raw: Pt[], mode: ShapeMode, opt: ShapeOptions): Prim {
   cands.push({ prim: el, poly: primPolygon(el) });
   // 小さすぎる島は単純図形だけで十分
   if (area > 30) for (const poly of polys) cands.push({ prim: { kind: 'path', segs: polySegs(poly) }, poly });
+
+  // 長方形の仲間（角の丸さ違い）は、合格したものの中で一番合うものを選ぶ
+  const family = cands.slice(0, 5).map((c) => ({ c, s: scorer.score(c.poly) })).filter((x) => x.s <= tol);
+  if (family.length) {
+    // 角を丸めるのは、丸みが十分大きく（1mm 以上）、四角より少しでもよく合うときだけ
+    const sharp = family.find((x) => x.c === cands[0]);
+    const best = family.reduce((p, q) => (q.s < p.s ? q : p));
+    const r = best.c.prim.kind === 'rect' ? best.c.prim.r : 0;
+    if (!sharp || (r >= opt.minRadius && best.s <= sharp.s * 0.97)) return best.c.prim;
+    return sharp.c.prim;
+  }
 
   let best: Cand | null = null, bestS = Infinity;
   for (const c of cands) {
@@ -385,7 +397,7 @@ export function alignRects(prims: Prim[]) {
       const near = (x: number, y: number) => Math.abs(x - y) <= 0.15 * Math.max(x, y);
       // 離れて並ぶ同じ大きさの四角だけ（重なっているものは別物）
       const apart = Math.abs(a.cx - b.cx) > (a.w + b.w) / 2 || Math.abs(a.cy - b.cy) > (a.h + b.h) / 2;
-      if (apart && near(a.w, b.w) && near(a.h, b.h) && Math.abs(a.r - b.r) < 1) parent[find(i)] = find(j);
+      if (apart && near(a.w, b.w) && near(a.h, b.h)) parent[find(i)] = find(j);
     }
   const groups = new Map<number, RectPrim[]>();
   rects.forEach((r, i) => {
@@ -396,7 +408,8 @@ export function alignRects(prims: Prim[]) {
     if (g.length < 2) continue;
     const w = g.reduce((s, r) => s + r.w, 0) / g.length;
     const h = g.reduce((s, r) => s + r.h, 0) / g.length;
-    for (const r of g) { r.w = w; r.h = h; }
+    const rad = Math.min(...g.map((r) => r.r));
+    for (const r of g) { r.w = w; r.h = h; r.r = rad; }
     // 高さがほぼ同じものは同じ行にそろえる
     const cys = g.map((r) => {
       const row = g.filter((o) => Math.abs(o.cy - r.cy) <= 0.12 * h);
