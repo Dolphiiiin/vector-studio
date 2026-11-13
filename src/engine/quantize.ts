@@ -6,6 +6,7 @@ export interface QuantizeOptions {
   smooth: number; // 0..4 エッジ保持平滑化の回数
   minArea: number; // px。これより小さい島は周囲に吸収
   background: number; // 0 で無効。外周から背景を広げるときの隣接画素の色差しきい値
+  flatten: boolean; // 同じ色味の濃淡（グラデーション・陰影）を 1 色にまとめる
 }
 
 export interface Cluster {
@@ -280,5 +281,48 @@ export function quantize(img: ImageData, opt: QuantizeOptions): QuantizeResult {
     };
   });
 
-  return { width: w, height: h, labels, clusters };
+  return opt.flatten ? flattenTones(labels, clusters) : { width: w, height: h, labels, clusters };
+
+  /**
+   * 色味（色相）が同じで明るさだけ違う色を 1 色にまとめる。代表色は面積がいちばん大きい色。
+   * 白・灰・黒のような色味のない色は明るさが別の色として残す（目の黒と縁取りの灰など）。
+   */
+  function flattenTones(lab: Uint8Array, cs: Cluster[]): QuantizeResult {
+    const HUE_TOL = 25, CHROMA_MIN = 12;
+    const info = cs.map((c) => {
+      const n = parseInt(c.hex.slice(1), 16);
+      const [l, a, b] = rgbToLab((n >> 16) & 255, (n >> 8) & 255, n & 255);
+      return { l, c: Math.hypot(a, b), h: (Math.atan2(b, a) * 180) / Math.PI };
+    });
+    const parent = cs.map((_, i) => i);
+    const find = (i: number): number => (parent[i] === i ? i : (parent[i] = find(parent[i])));
+    for (let i = 0; i < cs.length; i++)
+      for (let j = i + 1; j < cs.length; j++) {
+        if (cs[i].background || cs[j].background) continue;
+        const p = info[i], q = info[j];
+        const dh = Math.abs(((p.h - q.h + 540) % 360) - 180);
+        const sameHue = p.c >= CHROMA_MIN && q.c >= CHROMA_MIN && dh <= HUE_TOL;
+        const sameNeutral = p.c < CHROMA_MIN && q.c < CHROMA_MIN && Math.abs(p.l - q.l) < 6;
+        if (sameHue || sameNeutral) parent[find(i)] = find(j);
+      }
+    // グループごとに、面積最大の色を代表に
+    const rep = new Map<number, number>();
+    cs.forEach((c, i) => {
+      const r = find(i);
+      const cur = rep.get(r);
+      if (cur === undefined || cs[cur].count < c.count) rep.set(r, i);
+    });
+    const groups = [...rep.entries()]
+      .map(([root, ri]) => ({ root, ri, count: cs.reduce((s, c, i) => s + (find(i) === root ? c.count : 0), 0) }))
+      .sort((a, b) => b.count - a.count);
+    const newId = new Uint8Array(256);
+    cs.forEach((_, i) => (newId[i] = groups.findIndex((g) => g.root === find(i))));
+    const out = lab.map((v) => newId[v]);
+    return {
+      width: w,
+      height: h,
+      labels: out,
+      clusters: groups.map((g, i) => ({ id: i, hex: cs[g.ri].hex, count: g.count, background: cs[g.ri].background })),
+    };
+  }
 }

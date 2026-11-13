@@ -62,7 +62,7 @@ ${JSON.stringify(rows)}
 
 Decide, for each region:
 - sew: false for fabric/paper background, cast shadows, reflections, photo noise, anything that is not part of the design itself.
-- mergeInto: the id of another region when both are the same thread color split only by lighting, shading or highlights (shading is not stitched as a separate color). null otherwise. Never merge distinct design colors.
+- mergeInto: the id of another region when both are the same thread color split only by lighting, shading or highlights (this design uses no gradients: every shade of one hue is one thread). null otherwise. Never merge distinct design colors.
 - shape: "auto" lets the app pick the simplest fitting shape per island (rectangle, rounded rectangle, ellipse, polygon, curve) and is right for most regions. Override only when the intent is clear: "rect" for parts meant to be rectangles even if the photo is distorted, "straight" for straight-edged polygons, "smooth" for organic curves.
 - name: a 1-4 word Japanese name of what the region is (e.g. 顔, 髪, 目, ほっぺ, 縁取り, 影).
 Then give the stitching order of the regions that remain sewn: large base fills first, small details on top later, an outer border or outline last.
